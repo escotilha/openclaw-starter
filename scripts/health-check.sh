@@ -1,218 +1,217 @@
 #!/bin/bash
-# Script de Health Check para OpenClaw
-# Verifica instalação, configuração e conectividade
 
-echo "================================================"
-echo "OpenClaw Health Check"
-echo "================================================"
+echo "🏥 OpenClaw Health Check"
+echo "========================"
 echo ""
 
-# Cores
+EXIT_CODE=0
+
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-ERRORS=0
-WARNINGS=0
+check_ok() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
 
-# Função para verificação
-check() {
-    local name=$1
-    local command=$2
-    local expected=$3
-    
-    echo -n "Verificando $name... "
-    
-    if eval "$command" &> /dev/null; then
-        echo -e "${GREEN}✓${NC}"
-        return 0
-    else
-        echo -e "${RED}✗${NC}"
-        ((ERRORS++))
-        return 1
-    fi
+check_fail() {
+    echo -e "${RED}❌ $1${NC}"
+    EXIT_CODE=1
 }
 
 check_warn() {
-    local name=$1
-    local command=$2
-    
-    echo -n "Verificando $name... "
-    
-    if eval "$command" &> /dev/null; then
-        echo -e "${GREEN}✓${NC}"
-        return 0
-    else
-        echo -e "${YELLOW}⚠${NC}"
-        ((WARNINGS++))
-        return 1
-    fi
+    echo -e "${YELLOW}⚠️  $1${NC}"
 }
 
-# 1. OpenClaw instalado
-echo "=== Verificações de Instalação ==="
-check "OpenClaw CLI" "command -v openclaw"
-
-# 2. Node.js
-NODE_VERSION=$(node --version 2>/dev/null | sed 's/v//')
-if [ ! -z "$NODE_VERSION" ]; then
-    MAJOR_VERSION=$(echo $NODE_VERSION | cut -d. -f1)
-    if [ $MAJOR_VERSION -ge 20 ]; then
-        echo -e "Verificando Node.js... ${GREEN}✓${NC} (v$NODE_VERSION)"
-    else
-        echo -e "Verificando Node.js... ${YELLOW}⚠${NC} (v$NODE_VERSION - recomendado v20+)"
-        ((WARNINGS++))
-    fi
+# 1. Node.js
+echo "📦 Verificando dependências..."
+if command -v node &> /dev/null; then
+    NODE_VERSION=$(node --version)
+    check_ok "Node.js instalado: $NODE_VERSION"
 else
-    echo -e "Verificando Node.js... ${RED}✗${NC}"
-    ((ERRORS++))
+    check_fail "Node.js não encontrado. Instale: https://nodejs.org"
 fi
 
-# 3. Diretório OpenClaw
-check "Diretório ~/.openclaw" "[ -d ~/.openclaw ]"
-
-# 4. Arquivo de configuração
-check "openclaw.json" "[ -f ~/.openclaw/openclaw.json ]"
-
-echo ""
-echo "=== Verificações de Configuração ==="
-
-# 5. JSON válido
-if [ -f ~/.openclaw/openclaw.json ]; then
-    check "JSON válido" "jq empty ~/.openclaw/openclaw.json"
-fi
-
-# 6. API keys configuradas
-if [ -f ~/.openclaw/openclaw.json ]; then
-    check_warn "API key Anthropic" "grep -q 'ANTHROPIC_API_KEY' ~/.openclaw/openclaw.json || printenv ANTHROPIC_API_KEY"
-    check_warn "API key OpenAI" "grep -q 'OPENAI_API_KEY' ~/.openclaw/openclaw.json || printenv OPENAI_API_KEY"
-fi
-
-echo ""
-echo "=== Verificações de Segurança ==="
-
-# 7. Permissões de arquivo
-if [ -f ~/.openclaw/openclaw.json ]; then
-    PERMS=$(stat -f "%Lp" ~/.openclaw/openclaw.json 2>/dev/null || stat -c "%a" ~/.openclaw/openclaw.json 2>/dev/null)
-    if [ "$PERMS" = "600" ]; then
-        echo -e "Permissões openclaw.json... ${GREEN}✓${NC} (600)"
-    else
-        echo -e "Permissões openclaw.json... ${YELLOW}⚠${NC} ($PERMS - recomendado 600)"
-        ((WARNINGS++))
-    fi
-fi
-
-# 8. Gateway binding
-if [ -f ~/.openclaw/openclaw.json ]; then
-    BIND=$(jq -r '.gateway.bind // "not set"' ~/.openclaw/openclaw.json 2>/dev/null)
-    if [ "$BIND" = "loopback" ]; then
-        echo -e "Gateway binding... ${GREEN}✓${NC} (loopback)"
-    elif [ "$BIND" = "0.0.0.0" ]; then
-        echo -e "Gateway binding... ${RED}✗${NC} (0.0.0.0 - INSEGURO!)"
-        ((ERRORS++))
-    else
-        echo -e "Gateway binding... ${YELLOW}⚠${NC} ($BIND)"
-        ((WARNINGS++))
-    fi
-fi
-
-# 9. Auth token configurado
-if [ -f ~/.openclaw/openclaw.json ]; then
-    TOKEN=$(jq -r '.gateway.auth.token // "not set"' ~/.openclaw/openclaw.json 2>/dev/null)
-    if [ "$TOKEN" != "not set" ] && [ ${#TOKEN} -ge 32 ]; then
-        echo -e "Gateway auth token... ${GREEN}✓${NC} (${#TOKEN} chars)"
-    elif [ "$TOKEN" != "not set" ]; then
-        echo -e "Gateway auth token... ${YELLOW}⚠${NC} (${#TOKEN} chars - recomendado 32+)"
-        ((WARNINGS++))
-    else
-        echo -e "Gateway auth token... ${RED}✗${NC} (não configurado)"
-        ((ERRORS++))
-    fi
-fi
-
-echo ""
-echo "=== Verificações de Gateway ==="
-
-# 10. Gateway rodando
-if pgrep -f "openclaw.*gateway" > /dev/null; then
-    echo -e "Gateway process... ${GREEN}✓${NC} (rodando)"
-    
-    # 11. Porta respondendo
-    PORT=$(jq -r '.gateway.port // 18789' ~/.openclaw/openclaw.json 2>/dev/null)
-    if curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/health | grep -q "200"; then
-        echo -e "Gateway health endpoint... ${GREEN}✓${NC} (respondendo em porta $PORT)"
-    else
-        echo -e "Gateway health endpoint... ${YELLOW}⚠${NC} (não respondendo em porta $PORT)"
-        ((WARNINGS++))
-    fi
+# 2. OpenClaw CLI
+if command -v openclaw &> /dev/null; then
+    OPENCLAW_VERSION=$(openclaw --version 2>/dev/null || echo "unknown")
+    check_ok "OpenClaw instalado: $OPENCLAW_VERSION"
 else
-    echo -e "Gateway process... ${YELLOW}⚠${NC} (não rodando)"
-    echo "  Inicie com: openclaw gateway start"
-    ((WARNINGS++))
+    check_fail "OpenClaw não encontrado. Instale: npm install -g openclaw"
 fi
 
 echo ""
-echo "=== Verificações de Memória (Opcional) ==="
+echo "🗄️  Verificando PostgreSQL..."
 
-# 12. PostgreSQL
+# 3. PostgreSQL
 if command -v psql &> /dev/null; then
-    echo -e "PostgreSQL instalado... ${GREEN}✓${NC}"
+    PSQL_VERSION=$(psql --version | cut -d' ' -f3)
+    check_ok "PostgreSQL instalado: $PSQL_VERSION"
     
-    if pg_isready &> /dev/null; then
-        echo -e "PostgreSQL rodando... ${GREEN}✓${NC}"
+    # Verificar serviço rodando
+    if psql -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw template1; then
+        check_ok "PostgreSQL rodando"
+    else
+        check_fail "PostgreSQL não está rodando. Inicie: brew services start postgresql@16"
+    fi
+else
+    check_fail "psql não encontrado. Instale PostgreSQL."
+fi
+
+# 4. Database openclaw_memory
+if psql -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw openclaw_memory; then
+    check_ok "Database openclaw_memory existe"
+    
+    # Verificar pgvector
+    if psql openclaw_memory -tAc "SELECT 1 FROM pg_extension WHERE extname='vector';" 2>/dev/null | grep -q 1; then
+        check_ok "Extensão pgvector habilitada"
+    else
+        check_fail "pgvector não habilitado. Execute: psql openclaw_memory -c 'CREATE EXTENSION vector;'"
+    fi
+    
+    # Verificar tabela memories
+    if psql openclaw_memory -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='memories';" 2>/dev/null | grep -q 1; then
+        check_ok "Tabela memories existe"
         
-        # 13. Banco openclaw_memory
-        if psql -lqt | cut -d \| -f 1 | grep -qw openclaw_memory; then
-            echo -e "Banco openclaw_memory... ${GREEN}✓${NC}"
-            
-            # 14. pgvector extension
-            if psql openclaw_memory -tAc "SELECT 1 FROM pg_extension WHERE extname = 'vector';" 2>/dev/null | grep -q "1"; then
-                echo -e "Extensão pgvector... ${GREEN}✓${NC}"
-            else
-                echo -e "Extensão pgvector... ${YELLOW}⚠${NC} (não habilitada)"
-                ((WARNINGS++))
-            fi
-            
-            # 15. Schema memory
-            if psql openclaw_memory -tAc "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'memory';" 2>/dev/null | grep -q "1"; then
-                echo -e "Schema memory... ${GREEN}✓${NC}"
-            else
-                echo -e "Schema memory... ${YELLOW}⚠${NC} (não criado)"
-                ((WARNINGS++))
-            fi
+        # Contar memórias
+        MEMORY_COUNT=$(psql openclaw_memory -tAc "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo "0")
+        if [ "$MEMORY_COUNT" -gt 0 ]; then
+            check_ok "Memórias armazenadas: $MEMORY_COUNT"
         else
-            echo -e "Banco openclaw_memory... ${YELLOW}⚠${NC} (não encontrado)"
-            ((WARNINGS++))
+            check_warn "Nenhuma memória armazenada ainda (esperado se primeira vez)"
         fi
     else
-        echo -e "PostgreSQL rodando... ${YELLOW}⚠${NC} (não rodando)"
-        ((WARNINGS++))
+        check_fail "Tabela memories não existe. Execute: ./scripts/setup-postgres.sh"
     fi
 else
-    echo -e "PostgreSQL instalado... ${YELLOW}⚠${NC} (não instalado)"
-    echo "  Execute: ./scripts/setup-postgres.sh"
-    ((WARNINGS++))
+    check_fail "Database openclaw_memory não existe. Execute: ./scripts/setup-postgres.sh"
 fi
 
 echo ""
-echo "================================================"
-echo "Resumo do Health Check"
-echo "================================================"
+echo "⚙️  Verificando configuração..."
 
-if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
-    echo -e "${GREEN}✅ Todos os checks passaram!${NC}"
-    echo ""
-    echo "OpenClaw está configurado corretamente."
-    exit 0
-elif [ $ERRORS -eq 0 ]; then
-    echo -e "${YELLOW}⚠ $WARNINGS aviso(s) encontrado(s)${NC}"
-    echo ""
-    echo "OpenClaw funcional mas há recomendações para melhorar."
-    exit 0
+# 5. Pasta ~/.openclaw
+if [ -d ~/.openclaw ]; then
+    check_ok "Pasta ~/.openclaw existe"
+    
+    # Verificar permissões
+    PERMS=$(stat -f "%Lp" ~/.openclaw 2>/dev/null || stat -c "%a" ~/.openclaw 2>/dev/null)
+    if [ "$PERMS" = "700" ]; then
+        check_ok "Permissões corretas (700)"
+    else
+        check_warn "Permissões inseguras ($PERMS). Recomendado: chmod 700 ~/.openclaw"
+    fi
 else
-    echo -e "${RED}❌ $ERRORS erro(s) encontrado(s), $WARNINGS aviso(s)${NC}"
-    echo ""
-    echo "Corrija os erros antes de usar OpenClaw."
-    exit 1
+    check_fail "Pasta ~/.openclaw não existe. Crie: mkdir -p ~/.openclaw"
 fi
+
+# 6. openclaw.json
+if [ -f ~/.openclaw/openclaw.json ]; then
+    check_ok "Arquivo openclaw.json existe"
+    
+    # Validar JSON
+    if cat ~/.openclaw/openclaw.json | python3 -m json.tool > /dev/null 2>&1; then
+        check_ok "openclaw.json é JSON válido"
+    else
+        check_fail "openclaw.json tem erro de sintaxe"
+    fi
+else
+    check_fail "openclaw.json não encontrado. Copie: cp templates/single-agent.json ~/.openclaw/openclaw.json"
+fi
+
+# 7. .env
+if [ -f ~/.openclaw/.env ]; then
+    check_ok "Arquivo .env existe"
+    
+    # Verificar keys obrigatórias
+    if grep -q "OPENAI_API_KEY=" ~/.openclaw/.env; then
+        if grep -q "OPENAI_API_KEY=sk-" ~/.openclaw/.env; then
+            check_ok "OPENAI_API_KEY configurada"
+        else
+            check_warn "OPENAI_API_KEY parece placeholder"
+        fi
+    else
+        check_fail "OPENAI_API_KEY não encontrada no .env"
+    fi
+    
+    if grep -q "GATEWAY_AUTH_TOKEN=" ~/.openclaw/.env; then
+        TOKEN=$(grep "GATEWAY_AUTH_TOKEN=" ~/.openclaw/.env | cut -d'=' -f2)
+        if [ ${#TOKEN} -ge 32 ]; then
+            check_ok "GATEWAY_AUTH_TOKEN configurado"
+        else
+            check_warn "GATEWAY_AUTH_TOKEN muito curto (mínimo 32 caracteres)"
+        fi
+    else
+        check_warn "GATEWAY_AUTH_TOKEN não encontrado (opcional mas recomendado)"
+    fi
+else
+    check_fail ".env não encontrado. Copie: cp templates/.env.example ~/.openclaw/.env"
+fi
+
+echo ""
+echo "🚀 Verificando gateway..."
+
+# 8. Gateway status
+if openclaw gateway status &> /dev/null; then
+    GATEWAY_STATUS=$(openclaw gateway status 2>&1)
+    if echo "$GATEWAY_STATUS" | grep -q "running"; then
+        check_ok "Gateway rodando"
+        
+        # Verificar porta
+        PORT=$(grep -A 2 '"gateway"' ~/.openclaw/openclaw.json | grep '"port"' | grep -o '[0-9]\+')
+        PORT=${PORT:-8080}
+        
+        if lsof -i :$PORT > /dev/null 2>&1; then
+            check_ok "Porta $PORT aberta"
+        else
+            check_warn "Porta $PORT não está escutando"
+        fi
+        
+        # Testar endpoint
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:$PORT/api/status 2>/dev/null | grep -q "200\|401"; then
+            check_ok "API respondendo"
+        else
+            check_warn "API não responde em http://localhost:$PORT"
+        fi
+    else
+        check_warn "Gateway não está rodando. Inicie: openclaw gateway start"
+    fi
+else
+    check_warn "Gateway não está rodando. Inicie: openclaw gateway start"
+fi
+
+# 9. Logs
+if [ -f ~/.openclaw/logs/gateway.log ]; then
+    check_ok "Arquivo de log existe"
+    
+    # Verificar erros recentes
+    RECENT_ERRORS=$(tail -100 ~/.openclaw/logs/gateway.log 2>/dev/null | grep -i "error" | wc -l)
+    if [ "$RECENT_ERRORS" -gt 0 ]; then
+        check_warn "Encontrados $RECENT_ERRORS erros recentes nos logs"
+    fi
+else
+    check_warn "Arquivo de log não encontrado (esperado se gateway nunca iniciou)"
+fi
+
+echo ""
+echo "========================"
+if [ $EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Tudo OK! OpenClaw está pronto.${NC}"
+    echo ""
+    echo "🎉 Próximos passos:"
+    echo "   1. Iniciar gateway: openclaw gateway start"
+    echo "   2. Acessar webchat: http://localhost:8080"
+    echo "   3. Conectar canais: docs/CHANNELS.md"
+else
+    echo -e "${RED}❌ Problemas encontrados. Corrija os erros acima.${NC}"
+    echo ""
+    echo "📖 Guias:"
+    echo "   - Instalação: docs/INSTALL.md"
+    echo "   - PostgreSQL: docs/MEMORY.md"
+    echo "   - Segurança: docs/SECURITY.md"
+fi
+echo ""
+
+exit $EXIT_CODE
