@@ -1,0 +1,304 @@
+{
+  "_comment": "Template de Configuração OpenClaw Single-Agent",
+  "_aviso": "Substitua TODOS os valores placeholder antes de usar. Nunca faça commit de API keys reais!",
+  
+  "meta": {
+    "lastTouchedVersion": "2026.1.30"
+  },
+  
+  "env": {
+    "_comment": "Use variáveis de ambiente para dados sensíveis - veja .env.example",
+    "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+    "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+  },
+  
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "GERE-COM-openssl-rand-hex-32"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    }
+  },
+  
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "anthropic": {
+        "api": "anthropic-messages",
+        "baseUrl": "https://api.anthropic.com",
+        "models": [
+          {
+            "id": "claude-opus-4-5",
+            "name": "Claude Opus 4.5",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 3,
+              "output": 15,
+              "cacheRead": 0.3,
+              "cacheWrite": 3.75
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "claude-sonnet-4-5",
+            "name": "Claude Sonnet 4.5",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 3,
+              "output": 15,
+              "cacheRead": 0.3,
+              "cacheWrite": 3.75
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          },
+          {
+            "id": "claude-haiku-4",
+            "name": "Claude Haiku 4",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 0.25,
+              "output": 1.25,
+              "cacheRead": 0.03,
+              "cacheWrite": 0.3
+            },
+            "contextWindow": 200000,
+            "maxTokens": 8192
+          }
+        ]
+      },
+      "openai": {
+        "baseUrl": "https://api.openai.com/v1",
+        "apiKey": "${OPENAI_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "gpt-4o",
+            "name": "GPT-4o",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 2.5,
+              "output": 10,
+              "cacheRead": 1.25,
+              "cacheWrite": 3.75
+            },
+            "contextWindow": 128000,
+            "maxTokens": 16384
+          },
+          {
+            "id": "gpt-4o-mini",
+            "name": "GPT-4o Mini",
+            "reasoning": false,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 0.15,
+              "output": 0.6,
+              "cacheRead": 0.075,
+              "cacheWrite": 0.225
+            },
+            "contextWindow": 128000,
+            "maxTokens": 16384
+          }
+        ]
+      }
+    }
+  },
+  
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/seunome/.openclaw/workspace",
+      "maxConcurrent": 2,
+      "model": "anthropic/claude-sonnet-4-5",
+      "subagents": {
+        "maxConcurrent": 6,
+        "model": "anthropic/claude-sonnet-4-5"
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "model": "anthropic/claude-opus-4-5"
+      }
+    ]
+  },
+  
+  "channels": {
+    "whatsapp": {
+      "dmPolicy": "pairing",
+      "groupPolicy": "allowlist",
+      "mediaMaxMb": 50,
+      "debounceMs": 2000,
+      "sendReadReceipts": true,
+      "allowFrom": [
+        "+5511999999999"
+      ]
+    },
+    
+    "slack": {
+      "mode": "socket",
+      "enabled": false,
+      "userTokenReadOnly": true,
+      "groupPolicy": "allowlist",
+      "dm": {
+        "enabled": true,
+        "policy": "pairing"
+      },
+      "accounts": {
+        "meuworkspace": {
+          "mode": "socket",
+          "botToken": "${SLACK_BOT_TOKEN}",
+          "appToken": "${SLACK_APP_TOKEN}",
+          "userTokenReadOnly": true,
+          "groupPolicy": "allowlist",
+          "groups": {
+            "C01234ABCDE": true
+          }
+        }
+      }
+    },
+    
+    "telegram": {
+      "enabled": false,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": [
+        "@seunome"
+      ],
+      "groupPolicy": "allowlist"
+    },
+    
+    "discord": {
+      "enabled": false,
+      "botToken": "${DISCORD_BOT_TOKEN}",
+      "dmPolicy": "allowlist",
+      "allowFrom": [
+        "123456789012345678"
+      ],
+      "groupPolicy": "allowlist"
+    }
+  },
+  
+  "messages": {
+    "ackReactionScope": "group-mentions",
+    "tts": {
+      "auto": "off",
+      "provider": "elevenlabs",
+      "elevenlabs": {
+        "apiKey": "${ELEVENLABS_API_KEY}",
+        "voiceId": "21m00Tcm4TlvDq8ikWAM",
+        "modelId": "eleven_v3",
+        "voiceSettings": {
+          "speed": 1.0
+        }
+      }
+    }
+  },
+  
+  "tools": {
+    "media": {
+      "audio": {
+        "enabled": true,
+        "models": [
+          {
+            "provider": "groq",
+            "model": "whisper-large-v3",
+            "capabilities": ["audio"],
+            "baseUrl": "https://api.groq.com/openai/v1",
+            "headers": {
+              "Authorization": "Bearer ${GROQ_API_KEY}"
+            }
+          }
+        ]
+      }
+    }
+  },
+  
+  "plugins": {
+    "slots": {
+      "memory": "memory-postgres"
+    },
+    "entries": {
+      "whatsapp": {
+        "enabled": true
+      },
+      "slack": {
+        "enabled": false
+      },
+      "telegram": {
+        "enabled": false
+      },
+      "discord": {
+        "enabled": false
+      },
+      "memory-lancedb": {
+        "enabled": false,
+        "config": {
+          "embedding": {
+            "apiKey": "${OPENAI_API_KEY}"
+          }
+        }
+      },
+      "memory-postgres": {
+        "enabled": true,
+        "config": {
+          "host": "localhost",
+          "port": 5432,
+          "database": "openclaw_memory",
+          "user": "seu-usuario",
+          "password": "",
+          "embeddingApiKey": "${OPENAI_API_KEY}",
+          "embeddingModel": "text-embedding-3-small"
+        }
+      }
+    }
+  },
+  
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {
+      "openclaw-security-scanner": {
+        "enabled": true
+      }
+    }
+  },
+  
+  "logging": {
+    "level": "info",
+    "redactSensitive": "tools"
+  },
+  
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "boot-md": {
+          "enabled": true
+        },
+        "command-logger": {
+          "enabled": true
+        },
+        "session-memory": {
+          "enabled": true
+        }
+      }
+    }
+  }
+}
