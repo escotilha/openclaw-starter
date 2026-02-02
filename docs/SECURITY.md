@@ -1,436 +1,253 @@
-# Hardening de Segurança
+# Guia de Hardening de Segurança
 
-**⚠️ LEIA ANTES DE EXPOR SEU AGENTE À INTERNET!**
+**Configuração de segurança enterprise para deployments OpenClaw.**
 
-OpenClaw é poderoso. Sem proteção, você está dando acesso root da sua vida a qualquer pessoa. Este guia mostra como trancar as portas.
+## Os 12 Domínios de Segurança
 
-## 🔐 Checklist de Segurança Obrigatória
+### 1. Exposição do Gateway 🔴 Crítico
 
-- [ ] Token de autenticação configurado
-- [ ] Gateway ouvindo apenas em loopback (127.0.0.1)
-- [ ] DM policy definido (allowlist ou pairing)
-- [ ] Group policy: allowlist
-- [ ] Limites de tamanho de media configurados
-- [ ] Permissões de arquivo corretas (chmod 700)
-- [ ] API keys em `.env`, nunca em código
-- [ ] Backup de memórias criptografado
+```json
+{
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "gere-com-openssl-rand-hex-32"
+    }
+  }
+}
+```
 
-## 1. Token de Autenticação
-
-Gere um token forte:
-
+**Gerar token forte:**
 ```bash
 openssl rand -hex 32
 ```
 
-Adicione ao `~/.openclaw/.env`:
-
-```bash
-GATEWAY_AUTH_TOKEN=seu-token-aleatorio-de-64-caracteres-aqui
-```
-
-Configure no `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "gateway": {
-    "port": 8080,
-    "auth": {
-      "enabled": true,
-      "token": "${GATEWAY_AUTH_TOKEN}"
-    }
-  }
-}
-```
-
-**Teste:**
-
-```bash
-# Sem token — deve falhar
-curl http://localhost:8080/api/status
-
-# Com token — deve funcionar
-curl -H "Authorization: Bearer SEU-TOKEN" http://localhost:8080/api/status
-```
-
-## 2. Binding Seguro
-
-**NUNCA** faça bind em `0.0.0.0` (expõe para toda a rede).
-
-### ✅ Correto (loopback apenas)
-
-```json
-{
-  "gateway": {
-    "host": "127.0.0.1",
-    "port": 8080
-  }
-}
-```
-
-### ❌ ERRADO (exposto na rede)
-
-```json
-{
-  "gateway": {
-    "host": "0.0.0.0",  // ⚠️ NUNCA FAÇA ISSO!
-    "port": 8080
-  }
-}
-```
-
-### Acesso Remoto Seguro
-
-Use Tailscale ou SSH tunnel:
-
-**Opção 1: Tailscale (recomendado)**
-
-```bash
-# Instalar Tailscale
-brew install tailscale
-tailscale up
-
-# Gateway continua em 127.0.0.1, acesse via Tailscale IP
-# Ex: http://100.64.x.x:8080
-```
-
-**Opção 2: SSH Tunnel**
-
-```bash
-ssh -L 8080:127.0.0.1:8080 usuario@seu-servidor.com
-```
-
-## 3. Política de DMs
-
-Controle **quem** pode mandar DM pro seu agente.
-
-### Opção A: Allowlist (mais seguro)
-
-Apenas IDs específicos podem iniciar conversa:
+### 2. Política de DMs 🟠 Alto
 
 ```json
 {
   "channels": {
-    "slack": {
-      "dmPolicy": "allowlist",
-      "allowlist": ["U01234ABCD", "U56789EFGH"]
-    },
     "whatsapp": {
-      "dmPolicy": "allowlist",
-      "allowlist": ["+5511999999999", "+5511888888888"]
-    }
-  }
-}
-```
-
-### Opção B: Pairing (flexível)
-
-Qualquer pessoa pode pedir acesso, você aprova:
-
-```json
-{
-  "channels": {
-    "telegram": {
       "dmPolicy": "pairing",
-      "autoApprove": false
+      "allowFrom": ["+5511999999999"]
     }
   }
 }
 ```
 
-Quando alguém mandar DM:
+**Opções:**
+- `pairing` - Requer código de pareamento (recomendado)
+- `allowlist` - Apenas usuários listados
+- `open` - ⛔ NUNCA use em produção
 
-```
-[INFO] Pairing request from @fulano (ID: 123456789)
-```
-
-Aprovar:
-
-```bash
-openclaw pairing approve telegram 123456789
-```
-
-### ❌ NUNCA use "open"
-
-```json
-{
-  "dmPolicy": "open"  // ⚠️ Qualquer pessoa do mundo pode falar com seu agente!
-}
-```
-
-## 4. Política de Grupos
-
-**SEMPRE** use allowlist para grupos:
+### 3. Controle de Acesso a Grupos 🟠 Alto
 
 ```json
 {
   "channels": {
-    "discord": {
-      "groupPolicy": "allowlist",
-      "allowedGroups": ["1234567890", "0987654321"]
-    },
     "slack": {
       "groupPolicy": "allowlist",
-      "allowedChannels": ["C01234ABCD", "C56789EFGH"]
-    }
-  }
-}
-```
-
-## 5. Limites de Media
-
-Proteja contra ataques de DoS com arquivos grandes:
-
-```json
-{
-  "media": {
-    "maxSizeMB": 50,
-    "maxDuration": 600,
-    "allowedTypes": ["image/jpeg", "image/png", "audio/mpeg", "video/mp4"],
-    "scanForMalware": true
-  }
-}
-```
-
-## 6. Permissões de Arquivo
-
-Proteja a pasta OpenClaw:
-
-```bash
-# Apenas você pode ler/escrever
-chmod 700 ~/.openclaw
-chmod 600 ~/.openclaw/.env
-chmod 600 ~/.openclaw/openclaw.json
-
-# Verificar
-ls -la ~/.openclaw
-# Deve mostrar: drwx------ (700)
-```
-
-## 7. Slack: Tokens Read-Only
-
-Para Slack workspace que você **não** controla, use User Token com scopes mínimos:
-
-```
-users:read
-channels:read
-groups:read
-im:read
-mpim:read
-```
-
-**NUNCA** use Bot Token em workspace de terceiros (pode ler DMs privadas).
-
-Configure:
-
-```json
-{
-  "channels": {
-    "slack-readonly": {
-      "enabled": true,
-      "token": "${SLACK_USER_TOKEN}",
-      "type": "user",
-      "dmPolicy": "none",
-      "groupPolicy": "allowlist",
-      "allowedChannels": ["C01234ABCD"]
-    }
-  }
-}
-```
-
-## 8. PostgreSQL
-
-Proteja o banco de memórias:
-
-### Senha para Usuário Local
-
-```bash
-psql postgres
-```
-
-```sql
-ALTER USER psm2 WITH PASSWORD 'senha-forte-aqui';
-\q
-```
-
-Atualize connection string:
-
-```json
-{
-  "plugins": {
-    "memory-postgres": {
-      "config": {
-        "connectionString": "postgresql://psm2:senha-forte-aqui@localhost:5432/openclaw_memory"
+      "groups": {
+        "C01234ABCDE": true
       }
     }
   }
 }
 ```
 
-### Firewall (Produção)
+### 4. Segurança de Credenciais 🔴 Crítico
 
-Se PostgreSQL estiver em servidor remoto:
-
+**Permissões de arquivo:**
 ```bash
-# ufw (Ubuntu/Debian)
-sudo ufw allow from 192.168.1.0/24 to any port 5432
-
-# iptables
-sudo iptables -A INPUT -s 192.168.1.0/24 -p tcp --dport 5432 -j ACCEPT
-sudo iptables -A INPUT -p tcp --dport 5432 -j DROP
+chmod 700 ~/.openclaw
+chmod 600 ~/.openclaw/openclaw.json
+chmod 600 ~/.openclaw/credentials/*
 ```
 
-## 9. Backup Criptografado
-
-Criptografe backups de memória:
-
+**Use variáveis de ambiente:**
 ```bash
-# Backup + encrypt
-pg_dump openclaw_memory | gzip | openssl enc -aes-256-cbc -salt -out backup-$(date +%Y%m%d).sql.gz.enc
-
-# Decrypt + restore
-openssl enc -aes-256-cbc -d -in backup-20260201.sql.gz.enc | gunzip | psql openclaw_memory
+export ANTHROPIC_API_KEY="sua-key-aqui"
+export OPENAI_API_KEY="sua-key-aqui"
 ```
 
-## 10. Logs Seguros
+### 5. Binding de Rede 🟠 Alto
 
-Não logue dados sensíveis:
-
+**Local apenas:**
 ```json
 {
-  "logging": {
-    "level": "info",
-    "redactPatterns": [
-      "password",
-      "token",
-      "api_key",
-      "secret",
-      "credit_card"
-    ]
+  "gateway": {
+    "bind": "loopback"
   }
 }
 ```
 
-## 11. Rate Limiting
-
-Proteja contra spam:
-
+**Acesso remoto via Tailscale:**
 ```json
 {
-  "rateLimit": {
-    "enabled": true,
-    "maxMessagesPerMinute": 10,
-    "maxMessagesPerHour": 100,
-    "burstSize": 5
-  }
-}
-```
-
-## 12. Auditoria
-
-Monitore atividade suspeita:
-
-```bash
-# Ver últimas 100 mensagens
-tail -100 ~/.openclaw/logs/gateway.log
-
-# Filtrar por usuário
-grep "user:U12345" ~/.openclaw/logs/gateway.log
-
-# Alertar em erro
-tail -f ~/.openclaw/logs/gateway.log | grep ERROR --line-buffered | \
-  while read line; do
-    echo "$line" | mail -s "OpenClaw Error" seu@email.com
-  done
-```
-
-## 13. Skills Perigosos
-
-Alguns skills são **high-risk**. Entenda antes de habilitar:
-
-| Skill | Risco | Quando Usar |
-|---|---|---|
-| `exec` | 🔴 Crítico | Apenas localhost, nunca em produção |
-| `file-access` | 🟠 Alto | Limite paths com allowlist |
-| `web-browser` | 🟡 Médio | Seguro com URL allowlist |
-| `email` | 🟡 Médio | OK se não tem acesso a inbox sensível |
-| `calendar` | 🟢 Baixo | Geralmente seguro |
-
-Configure allowlist para skills sensíveis:
-
-```json
-{
-  "skills": {
-    "file-access": {
-      "enabled": true,
-      "allowedPaths": [
-        "/Users/voce/Documents/openclaw-workspace",
-        "/tmp"
-      ],
-      "deniedPaths": [
-        "/Users/voce/.ssh",
-        "/Users/voce/.aws"
-      ]
+  "gateway": {
+    "tailscale": {
+      "mode": "on"
     }
   }
 }
 ```
 
-## 14. Variáveis de Ambiente
+### 6. Limites de Mídia e Rate 🟡 Médio
 
-**NUNCA** commite `.env` ou `openclaw.json` com credentials reais.
-
-### .gitignore
-
-```gitignore
-.env
-.env.local
-openclaw.json
-*.log
-backups/
+```json
+{
+  "channels": {
+    "whatsapp": {
+      "mediaMaxMb": 50,
+      "debounceMs": 2000
+    }
+  },
+  "agents": {
+    "defaults": {
+      "maxConcurrent": 2
+    }
+  }
+}
 ```
 
-### Template para Time
+### 7. Tokens Slack Read-Only 🟠 Alto
 
-Crie `.env.example`:
+```json
+{
+  "channels": {
+    "slack": {
+      "userTokenReadOnly": true
+    }
+  }
+}
+```
+
+### 8. Permissões de Arquivo 🟡 Médio
 
 ```bash
-# OpenAI (embeddings + opcional LLM)
-OPENAI_API_KEY=sk-sua-key-aqui
-
-# Anthropic (Claude)
-ANTHROPIC_API_KEY=sk-ant-sua-key-aqui
-
-# Gateway
-GATEWAY_AUTH_TOKEN=openssl-rand-hex-32
-
-# Slack
-SLACK_BOT_TOKEN=xoxb-sua-token
-SLACK_APP_TOKEN=xapp-sua-token
-
-# PostgreSQL
-DATABASE_URL=postgresql://user:pass@localhost:5432/openclaw_memory
+#!/bin/bash
+# Script de verificação
+chmod 700 ~/.openclaw
+find ~/.openclaw -name "*.json" -exec chmod 600 {} \;
+find ~/.openclaw/credentials -type f -exec chmod 600 {} \;
 ```
 
-Time clona repo, copia `.env.example` → `.env` e preenche.
+### 9. Logging & Redação 🟡 Médio
 
-## 15. Incident Response
+```json
+{
+  "logging": {
+    "level": "info",
+    "redactSensitive": "tools"
+  }
+}
+```
 
-Se credenciais vazarem:
+### 10. Segurança do Banco de Dados 🔴 Crítico
 
-1. **Revogar imediatamente** (Slack, OpenAI, Anthropic dashboards)
-2. Gerar novas keys
-3. Atualizar `.env` e `openclaw.json`
-4. Restart gateway: `openclaw gateway restart`
-5. Checar logs para atividade suspeita
-6. Rodar `./scripts/health-check.sh`
+**Desenvolvimento local:**
+```json
+{
+  "plugins": {
+    "entries": {
+      "memory-postgres": {
+        "config": {
+          "host": "localhost",
+          "password": ""
+        }
+      }
+    }
+  }
+}
+```
 
-## Próximos Passos
+**Produção:**
+```json
+{
+  "plugins": {
+    "entries": {
+      "memory-postgres": {
+        "config": {
+          "host": "db.exemplo.com",
+          "password": "${DB_PASSWORD}",
+          "ssl": true
+        }
+      }
+    }
+  }
+}
+```
 
-- [CHANNELS.md](CHANNELS.md) — Conectar canais com segurança
-- [MULTI-AGENT.md](MULTI-AGENT.md) — Isolar agentes por permissões
-- [MEMORY.md](MEMORY.md) — Backup seguro de memórias
+### 11. Proteção contra Prompt Injection 🟡 Médio
+
+**Estratégias:**
+1. Manter DMs travados (pairing/allowlist)
+2. Usar mention gating em grupos
+3. Tratar links como hostis
+4. Sandboxing de conteúdo externo
+5. Usar modelos instruction-hardened
+
+### 12. Backup & Recuperação 🟡 Médio
+
+```bash
+#!/bin/bash
+# backup-openclaw.sh
+BACKUP_DIR=~/openclaw-backups
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+cp ~/.openclaw/openclaw.json $BACKUP_DIR/openclaw_$DATE.json
+pg_dump openclaw_memory > $BACKUP_DIR/db_$DATE.sql
+
+find $BACKUP_DIR -type f -mtime +7 -delete
+```
+
+## Checklist de Segurança
+
+### Crítico 🔴
+- [ ] Gateway bound a `loopback`
+- [ ] Token forte de auth (32+ chars)
+- [ ] Política DM: `pairing` ou `allowlist`
+- [ ] Política de grupo: `allowlist`
+- [ ] Permissões de arquivo: 700 (dirs), 600 (arquivos)
+- [ ] API keys em variáveis de ambiente
+
+### Alto 🟠
+- [ ] WhatsApp debounce ≥ 2000ms
+- [ ] Rate limits configurados
+- [ ] Tokens Slack read-only
+- [ ] Limites de mídia definidos
+- [ ] Logs redacted
+
+### Médio 🟡
+- [ ] Rotação de logs configurada
+- [ ] Backups diários automatizados
+- [ ] Secret scanning habilitado
+- [ ] Firewall rules configuradas
+
+## Resposta a Incidentes
+
+### 1. Contenção
+```bash
+openclaw gateway stop
+chmod 000 ~/.openclaw/openclaw.json
+```
+
+### 2. Investigação
+```bash
+tail -100 ~/.openclaw/logs/gateway.log
+grep "unauthorized\|failed" ~/.openclaw/logs/*.log
+```
+
+### 3. Rotação
+```bash
+NEW_TOKEN=$(openssl rand -hex 32)
+# Rotacione API keys em consoles dos provedores
+```
 
 ---
 
-**Regra de Ouro:** Se você não faria em produção com SSH root, não faça com OpenClaw.
+**Próximo**: Veja [Multi-Agent](MULTI-AGENT.md) para isolamento de segurança entre agentes.

@@ -1,196 +1,166 @@
 #!/bin/bash
-# Script de Setup PostgreSQL + pgvector para OpenClaw
-# Para macOS (Homebrew)
+set -e
 
-set -e  # Sair em erro
-
-echo "================================================"
-echo "Setup de Memória PostgreSQL para OpenClaw"
-echo "================================================"
+echo "🐘 OpenClaw PostgreSQL Setup Script"
+echo "===================================="
 echo ""
 
-# Cores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # Sem Cor
+# Detectar OS
+OS="$(uname -s)"
+case "${OS}" in
+    Darwin*)    OS_TYPE="macOS";;
+    Linux*)     OS_TYPE="Linux";;
+    *)          OS_TYPE="UNKNOWN";;
+esac
 
-# Verificar se Homebrew está instalado
-if ! command -v brew &> /dev/null; then
-    echo -e "${RED}❌ Homebrew não encontrado${NC}"
-    echo "Instale Homebrew primeiro: https://brew.sh"
-    exit 1
-fi
+echo "🖥️  Sistema operacional: $OS_TYPE"
+echo ""
 
-echo -e "${GREEN}✓ Homebrew encontrado${NC}"
-
-# Verificar se PostgreSQL está instalado
-if ! command -v psql &> /dev/null; then
-    echo -e "${YELLOW}📦 Instalando PostgreSQL...${NC}"
-    brew install postgresql@16
-    echo -e "${GREEN}✓ PostgreSQL instalado${NC}"
-else
-    echo -e "${GREEN}✓ PostgreSQL já instalado${NC}"
-fi
-
-# Iniciar serviço PostgreSQL
-echo -e "${YELLOW}🚀 Iniciando serviço PostgreSQL...${NC}"
-brew services start postgresql@16
-sleep 2  # Aguardar serviço iniciar
-
-# Verificar se PostgreSQL está rodando
-if ! pg_isready &> /dev/null; then
-    echo -e "${RED}❌ Serviço PostgreSQL não está rodando${NC}"
-    echo "Tente: brew services restart postgresql@16"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Serviço PostgreSQL rodando${NC}"
-
-# Instalar pgvector
-if ! brew list pgvector &> /dev/null; then
-    echo -e "${YELLOW}📦 Instalando pgvector...${NC}"
-    brew install pgvector
-    echo -e "${GREEN}✓ pgvector instalado${NC}"
-else
-    echo -e "${GREEN}✓ pgvector já instalado${NC}"
-fi
-
-# Criar banco de dados
-echo -e "${YELLOW}📂 Criando banco openclaw_memory...${NC}"
-if psql postgres -lqt | cut -d \| -f 1 | grep -qw openclaw_memory; then
-    echo -e "${YELLOW}⚠ Banco openclaw_memory já existe${NC}"
-    read -p "Dropar e recriar? (s/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[SsYy]$ ]]; then
-        dropdb openclaw_memory
-        createdb openclaw_memory
-        echo -e "${GREEN}✓ Banco recriado${NC}"
-    else
-        echo -e "${YELLOW}Pulando criação do banco${NC}"
+# Instalar PostgreSQL
+if [ "$OS_TYPE" = "macOS" ]; then
+    if ! command -v brew &> /dev/null; then
+        echo "❌ Homebrew não encontrado. Instale em: https://brew.sh"
+        exit 1
     fi
+    
+    echo "📦 Instalando PostgreSQL 16 via Homebrew..."
+    brew install postgresql@16 || true
+    
+    echo "📦 Instalando pgvector..."
+    brew install pgvector || true
+    
+    echo "🚀 Iniciando serviço PostgreSQL..."
+    brew services start postgresql@16
+    
+    # Adicionar ao PATH
+    export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+    
+    echo ""
+    echo "💡 Adicione ao seu ~/.zshrc ou ~/.bashrc:"
+    echo "   export PATH=\"/opt/homebrew/opt/postgresql@16/bin:\$PATH\""
+    
+elif [ "$OS_TYPE" = "Linux" ]; then
+    echo "📦 Instalando PostgreSQL no Linux..."
+    
+    # Detectar distro
+    if [ -f /etc/debian_version ]; then
+        sudo apt-get update
+        sudo apt-get install -y postgresql postgresql-contrib
+        sudo systemctl start postgresql
+        sudo systemctl enable postgresql
+    elif [ -f /etc/redhat-release ]; then
+        sudo yum install -y postgresql-server postgresql-contrib
+        sudo postgresql-setup initdb
+        sudo systemctl start postgresql
+        sudo systemctl enable postgresql
+    else
+        echo "⚠️  Distro Linux não reconhecida. Instale PostgreSQL manualmente."
+        exit 1
+    fi
+    
+    echo "📦 Instalando pgvector..."
+    echo "⚠️  pgvector deve ser compilado do fonte no Linux:"
+    echo "   git clone https://github.com/pgvector/pgvector.git"
+    echo "   cd pgvector && make && sudo make install"
 else
-    createdb openclaw_memory
-    echo -e "${GREEN}✓ Banco criado${NC}"
+    echo "❌ Sistema operacional não suportado: $OS_TYPE"
+    exit 1
 fi
 
-# Habilitar extensão pgvector
-echo -e "${YELLOW}🧩 Habilitando extensão pgvector...${NC}"
-psql openclaw_memory -c "CREATE EXTENSION IF NOT EXISTS vector;" &> /dev/null
-echo -e "${GREEN}✓ Extensão pgvector habilitada${NC}"
+echo ""
+echo "⏳ Aguardando PostgreSQL iniciar..."
+sleep 3
+
+# Criar database
+echo "🗄️  Criando database openclaw_memory..."
+if createdb openclaw_memory 2>/dev/null; then
+    echo "✅ Database criado com sucesso"
+else
+    echo "⚠️  Database já existe ou erro ao criar"
+fi
+
+# Habilitar pgvector
+echo "🧩 Habilitando extensão pgvector..."
+psql openclaw_memory << 'EOF'
+CREATE EXTENSION IF NOT EXISTS vector;
+\dx
+EOF
 
 # Criar schema
-echo -e "${YELLOW}📋 Criando schema de memória...${NC}"
-
-psql openclaw_memory <<'SQL'
--- Criar schema memory
-CREATE SCHEMA IF NOT EXISTS memory;
-
--- Criar tabela memories com embeddings vetoriais
-CREATE TABLE IF NOT EXISTS memory.memories (
-    id SERIAL PRIMARY KEY,
-    content TEXT NOT NULL,
-    embedding vector(1536),
-    metadata JSONB,
-    agent_id VARCHAR(100),
-    session_id VARCHAR(255),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+echo "📊 Criando schema de memória..."
+psql openclaw_memory << 'EOF'
+CREATE TABLE IF NOT EXISTS memories (
+  id SERIAL PRIMARY KEY,
+  agent_id VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  embedding vector(1536),
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Criar índices para busca de similaridade vetorial
+-- Índice para busca vetorial
 CREATE INDEX IF NOT EXISTS memories_embedding_idx 
-ON memory.memories 
-USING ivfflat (embedding vector_cosine_ops)
+ON memories USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 
--- Criar índices para queries de metadata
-CREATE INDEX IF NOT EXISTS memories_agent_id_idx ON memory.memories (agent_id);
-CREATE INDEX IF NOT EXISTS memories_session_id_idx ON memory.memories (session_id);
-CREATE INDEX IF NOT EXISTS memories_created_at_idx ON memory.memories (created_at);
-CREATE INDEX IF NOT EXISTS memories_metadata_idx ON memory.memories USING GIN (metadata);
+-- Índice para queries por agente
+CREATE INDEX IF NOT EXISTS memories_agent_id_idx 
+ON memories(agent_id);
 
--- Criar função para atualizar timestamps
-CREATE OR REPLACE FUNCTION memory.update_updated_at_column()
+-- Índice para queries por data
+CREATE INDEX IF NOT EXISTS memories_created_at_idx 
+ON memories(created_at DESC);
+
+-- Trigger para atualizar updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
+   NEW.updated_at = CURRENT_TIMESTAMP;
+   RETURN NEW;
 END;
 $$ language 'plpgsql';
 
--- Criar trigger para atualização automática de timestamps
-DROP TRIGGER IF EXISTS update_memories_updated_at ON memory.memories;
 CREATE TRIGGER update_memories_updated_at 
-BEFORE UPDATE ON memory.memories
+BEFORE UPDATE ON memories 
 FOR EACH ROW 
-EXECUTE FUNCTION memory.update_updated_at_column();
-SQL
+EXECUTE FUNCTION update_updated_at_column();
+EOF
 
-echo -e "${GREEN}✓ Schema criado${NC}"
-
-# Verificar instalação
+# Verificar
 echo ""
-echo -e "${YELLOW}🔍 Verificando instalação...${NC}"
-
-# Verificar versão PostgreSQL
-PG_VERSION=$(psql --version | awk '{print $3}')
-echo -e "Versão PostgreSQL: ${GREEN}$PG_VERSION${NC}"
-
-# Verificar versão pgvector
-PGVECTOR_VERSION=$(psql openclaw_memory -tAc "SELECT extversion FROM pg_extension WHERE extname = 'vector';")
-echo -e "Versão pgvector: ${GREEN}$PGVECTOR_VERSION${NC}"
-
-# Verificar schema
-TABLE_COUNT=$(psql openclaw_memory -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'memory';")
-echo -e "Tabelas memory criadas: ${GREEN}$TABLE_COUNT${NC}"
+echo "✅ Verificando instalação..."
+psql openclaw_memory -c "SELECT COUNT(*) as total_memories FROM memories;"
 
 echo ""
-echo -e "${GREEN}================================================${NC}"
-echo -e "${GREEN}✅ Setup PostgreSQL completo!${NC}"
-echo -e "${GREEN}================================================${NC}"
+echo "🎉 Setup concluído!"
 echo ""
-echo "Próximos passos:"
+echo "📝 Próximos passos:"
 echo ""
-echo "1. Obtenha sua API key OpenAI para embeddings:"
-echo "   https://platform.openai.com/api-keys"
+echo "1. Adicionar ao ~/.openclaw/.env:"
+echo "   DATABASE_URL=postgresql://localhost:5432/openclaw_memory"
 echo ""
-echo "2. Atualize openclaw.json com:"
+echo "2. Adicionar ao ~/.openclaw/openclaw.json:"
+cat << 'JSON'
+   {
+     "plugins": {
+       "memory-postgres": {
+         "enabled": true,
+         "config": {
+           "connectionString": "${DATABASE_URL}",
+           "embeddingProvider": "openai",
+           "embeddingModel": "text-embedding-3-small",
+           "embeddingDimensions": 1536
+         }
+       }
+     }
+   }
+JSON
 echo ""
-echo "   {
-  \"plugins\": {
-    \"slots\": {
-      \"memory\": \"memory-postgres\"
-    },
-    \"entries\": {
-      \"memory-postgres\": {
-        \"enabled\": true,
-        \"config\": {
-          \"host\": \"localhost\",
-          \"port\": 5432,
-          \"database\": \"openclaw_memory\",
-          \"user\": \"$(whoami)\",
-          \"password\": \"\",
-          \"embeddingApiKey\": \"\${OPENAI_API_KEY}\",
-          \"embeddingModel\": \"text-embedding-3-small\"
-        }
-      }
-    }
-  }
-}"
-echo ""
-echo "3. Defina variável de ambiente:"
-echo "   export OPENAI_API_KEY=\"sua-key-aqui\""
-echo ""
-echo "4. Reinicie gateway OpenClaw:"
+echo "3. Reiniciar gateway:"
 echo "   openclaw gateway restart"
 echo ""
-echo -e "${YELLOW}Conexão com banco:${NC}"
-echo "  Host: localhost"
-echo "  Port: 5432"
-echo "  Database: openclaw_memory"
-echo "  User: $(whoami)"
+echo "4. Testar:"
+echo "   psql openclaw_memory -c 'SELECT * FROM memories LIMIT 5;'"
 echo ""
-echo "Testar conexão:"
-echo "  psql openclaw_memory -c \"SELECT COUNT(*) FROM memory.memories;\""
-echo ""
+echo "📖 Documentação completa: docs/MEMORY.md"

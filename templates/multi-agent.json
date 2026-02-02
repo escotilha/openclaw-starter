@@ -1,123 +1,145 @@
 {
+  "_comment": "Template Configuração OpenClaw Multi-Agent (2-3 agentes)",
+  "_aviso": "Substitua TODOS valores placeholder. Nunca faça commit de API keys reais!",
+  "_agentes": "Config inclui 'main' (pessoal), 'work' (trabalho), 'tech' (técnico)",
+  
+  "meta": {
+    "lastTouchedVersion": "2026.1.30"
+  },
+  
+  "env": {
+    "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+    "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+    "SLACK_PERSONAL_BOT_TOKEN": "${SLACK_PERSONAL_BOT_TOKEN}",
+    "SLACK_PERSONAL_APP_TOKEN": "${SLACK_PERSONAL_APP_TOKEN}",
+    "SLACK_WORK_BOT_TOKEN": "${SLACK_WORK_BOT_TOKEN}",
+    "SLACK_WORK_APP_TOKEN": "${SLACK_WORK_APP_TOKEN}"
+  },
+  
   "gateway": {
-    "host": "127.0.0.1",
-    "port": 8080,
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
     "auth": {
-      "enabled": true,
-      "token": "${GATEWAY_AUTH_TOKEN}"
+      "mode": "token",
+      "token": "GERE-COM-openssl-rand-hex-32"
     }
   },
-  "agents": [
-    {
-      "id": "claudia",
-      "name": "Claudia",
-      "model": "anthropic/claude-sonnet-4",
-      "systemPrompt": "Você é Claudia, assistente executiva em português brasileiro. Seja profissional, eficiente e proativa. Gerencie calendário, emails e tarefas.",
-      "thinking": {
-        "enabled": false
+  
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/seunome/.openclaw/workspace",
+      "maxConcurrent": 2,
+      "model": "anthropic/claude-sonnet-4-5",
+      "memory": {
+        "shared": false
       }
     },
-    {
-      "id": "analista",
-      "name": "Analista",
-      "model": "anthropic/claude-opus-4",
-      "systemPrompt": "Você é um analista técnico especializado. Responda com dados, análises profundas e insights acionáveis. Use thinking para problemas complexos.",
-      "thinking": {
-        "enabled": true
-      }
-    },
-    {
-      "id": "criativo",
-      "name": "Criativo",
-      "model": "openai/gpt-4o",
-      "systemPrompt": "Você é um assistente criativo. Ajude com brainstorming, escrita criativa, marketing e design de conteúdo.",
-      "thinking": {
-        "enabled": false
-      }
-    }
-  ],
-  "channels": {
-    "webchat": {
-      "enabled": true,
-      "defaultAgent": "claudia"
-    },
-    "slack": {
-      "enabled": true,
-      "token": "${SLACK_BOT_TOKEN}",
-      "appToken": "${SLACK_APP_TOKEN}",
-      "socketMode": true,
-      "dmPolicy": "allowlist",
-      "allowlist": ["${SLACK_USER_ID}"],
-      "groupPolicy": "allowlist",
-      "allowedChannels": [],
-      "defaultAgent": "claudia"
-    },
-    "whatsapp": {
-      "enabled": false,
-      "token": "${WHATSAPP_TOKEN}",
-      "phoneNumberId": "${WHATSAPP_PHONE_ID}",
-      "dmPolicy": "allowlist",
-      "allowlist": ["${YOUR_PHONE_NUMBER}"],
-      "defaultAgent": "claudia"
-    }
-  },
-  "plugins": {
-    "memory-postgres": {
-      "enabled": true,
-      "config": {
-        "connectionString": "${DATABASE_URL}",
-        "embeddingProvider": "openai",
-        "embeddingModel": "text-embedding-3-small",
-        "embeddingDimensions": 1536,
-        "maxMemories": 100,
-        "similarityThreshold": 0.7
-      }
-    }
-  },
-  "embeddings": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536
-  },
-  "routing": {
-    "enabled": true,
-    "rules": [
+    "list": [
       {
-        "pattern": "analise|análise|dados|metrics|relatório",
-        "agent": "analista"
+        "id": "main",
+        "workspace": "/Users/seunome/.openclaw/workspace-main",
+        "model": "anthropic/claude-opus-4-5",
+        "identity": {
+          "name": "Main",
+          "emoji": "⚡"
+        },
+        "memory": {
+          "namespace": "main"
+        }
       },
       {
-        "pattern": "criativo|marketing|brainstorm|escreva|design",
-        "agent": "criativo"
+        "id": "work",
+        "workspace": "/Users/seunome/.openclaw/workspace-work",
+        "identity": {
+          "name": "Work",
+          "emoji": "📊"
+        },
+        "memory": {
+          "namespace": "work"
+        }
+      },
+      {
+        "id": "tech",
+        "workspace": "/Users/seunome/.openclaw/workspace-tech",
+        "model": "openai/gpt-4o",
+        "identity": {
+          "name": "Tech",
+          "emoji": "💻"
+        },
+        "memory": {
+          "namespace": "tech"
+        }
       }
     ]
   },
+  
+  "channels": {
+    "whatsapp": {
+      "accounts": {
+        "pessoal": {
+          "agent": "main",
+          "dmPolicy": "pairing",
+          "debounceMs": 2000
+        },
+        "trabalho": {
+          "agent": "work",
+          "dmPolicy": "allowlist",
+          "debounceMs": 2000
+        }
+      }
+    },
+    
+    "slack": {
+      "mode": "socket",
+      "enabled": true,
+      "accounts": {
+        "pessoal": {
+          "agent": "main",
+          "botToken": "${SLACK_PERSONAL_BOT_TOKEN}",
+          "appToken": "${SLACK_PERSONAL_APP_TOKEN}"
+        },
+        "empresa": {
+          "agent": "work",
+          "botToken": "${SLACK_WORK_BOT_TOKEN}",
+          "appToken": "${SLACK_WORK_APP_TOKEN}",
+          "groupPolicy": "allowlist",
+          "groups": {
+            "C01234ABCDE": true
+          }
+        }
+      }
+    }
+  },
+  
+  "plugins": {
+    "slots": {
+      "memory": "memory-postgres"
+    },
+    "entries": {
+      "whatsapp": {
+        "enabled": true
+      },
+      "slack": {
+        "enabled": true
+      },
+      "memory-postgres": {
+        "enabled": true,
+        "config": {
+          "host": "localhost",
+          "port": 5432,
+          "database": "openclaw_memory",
+          "user": "seu-usuario",
+          "password": "",
+          "embeddingApiKey": "${OPENAI_API_KEY}",
+          "embeddingModel": "text-embedding-3-small"
+        }
+      }
+    }
+  },
+  
   "logging": {
     "level": "info",
-    "redactPatterns": [
-      "password",
-      "token",
-      "api_key",
-      "secret"
-    ]
-  },
-  "media": {
-    "maxSizeMB": 50,
-    "maxDuration": 600,
-    "allowedTypes": [
-      "image/jpeg",
-      "image/png",
-      "image/gif",
-      "image/webp",
-      "audio/mpeg",
-      "audio/wav",
-      "video/mp4"
-    ]
-  },
-  "rateLimit": {
-    "enabled": true,
-    "maxMessagesPerMinute": 20,
-    "maxMessagesPerHour": 200,
-    "burstSize": 10
+    "redactSensitive": "tools"
   }
 }
